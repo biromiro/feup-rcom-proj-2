@@ -1,5 +1,5 @@
 # project name (generate executable with this name)
-TARGET   = app
+TARGET   = download
 
 CC       = gcc
 # compiling flags here
