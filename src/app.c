@@ -1,6 +1,6 @@
 #include "app.h"
 
-const connection_params params;
+connection_params params;
 
 int check_and_initialize(char * url){
     
@@ -67,13 +67,34 @@ int initialize_connection_params(const char * user, const char * password, const
     if((user == NULL && password != NULL) ||(user != NULL && password == NULL)) return -1;
 
     if(user != NULL) {
-        printf("user:%s, pass:%s, host:%s, url_path:%s\n", user, password, host, url_path);
-        return 0;
+
+        params.user = (char*) malloc(strlen(user) * sizeof(char));
+        strcpy(params.user, user);
+        params.password = (char*) malloc(strlen(password) * sizeof(char));
+        strcpy(params.password, password);
+
     } else {
-        printf("host:%s, url_path:%s\n", host, url_path);
-        return 0;
+
+        params.user = NULL;
+        params.password = NULL;
+
     }
-    
-    return -1;
+
+    params.host = (char*) malloc(strlen(host) * sizeof(char));
+    strcpy(params.host, host);
+    params.url_path = (char*) malloc(strlen(url_path) * sizeof(char));
+    strcpy(params.url_path, url_path);
+
+    return 0;
 }
+
+void print_connection_params(){ 
+    
+    if(params.user != NULL) 
+        printf("FTP CONNECTION - user:%s; password:%s; host:%s; url_path:%s\n", params.user, params.password, params.host, params.url_path);
+    else 
+        printf("FTP CONNECTION - user:anonymous; host:%s; url_path:%s\n", params.host, params.url_path);
+
+}
+
 
