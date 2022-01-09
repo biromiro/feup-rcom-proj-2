@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <regex.h>
+#include <netdb.h>
 
 typedef struct {
     char * user;
@@ -20,5 +21,7 @@ int valid_host(char * host);
 int initialize_connection_params(const char * user, const char * password, const char * host, const char * url_path);
 
 void print_connection_params();
+
+int my_func();
 
 #endif

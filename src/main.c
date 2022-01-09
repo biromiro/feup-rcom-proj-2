@@ -15,6 +15,8 @@ int main(int argc, char **argv) {
 
     print_connection_params();
 
+    my_func();
+
     return 0;
 }
 

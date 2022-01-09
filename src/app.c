@@ -1,4 +1,11 @@
 #include "app.h"
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#define FTP_CTRL 21
 
 connection_params params;
 
@@ -8,13 +15,20 @@ int check_and_initialize(char * url){
 
     char * user = NULL;
     char * password = NULL;
-    char * host = NULL;
+    char * hostname = NULL;
     char * url_path = NULL;
 
     char * no_header_url = url + 6;
 
+    size_t url_size = strlen(no_header_url);
+
     char * host_component = strtok(no_header_url, "/");
-    url_path = no_header_url + strlen(host_component) + 1;
+    if (strlen(host_component) == url_size) // no path
+    {
+        url_path = malloc(1);
+        url_path = "";
+    }
+    else url_path = no_header_url + strlen(host_component) + 1;
 
     if(host_component == NULL || url_path == NULL) return -1;
 
@@ -23,20 +37,20 @@ int check_and_initialize(char * url){
     if(has_auth) {
 
         char * auth = strtok(host_component, "@");
-        host = strtok(NULL, "@");
+        hostname = strtok(NULL, "@");
 
         user = strtok(auth, ":");
         password = strtok(NULL, ":");
 
-    } else host = host_component;    
+    } else hostname = host_component;
 
-    if(valid_host(host) != 0) return -1;
+    if(valid_host(hostname) != 0) return -1;
 
-    return initialize_connection_params(user, password, host, url_path);
+    return initialize_connection_params(user, password, hostname, url_path);
 
 }
 
-int valid_host(char * host) {
+int valid_host(char * hostname) {
     
     regex_t regex_ip, regex_hostname;
     char regex_exp_ip[] = "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$";
@@ -50,8 +64,8 @@ int valid_host(char * host) {
         return -1;
     }
 
-    int passed_ip = regexec(&regex_ip, host, 0, NULL, 0);
-    int passed_hostname = regexec(&regex_hostname, host, 0, NULL, 0);
+    int passed_ip = regexec(&regex_ip, hostname, 0, NULL, 0);
+    int passed_hostname = regexec(&regex_hostname, hostname, 0, NULL, 0);
 
 
     if(passed_ip == 0 || passed_hostname == 0) return 0;
@@ -60,9 +74,9 @@ int valid_host(char * host) {
 
 }
 
-int initialize_connection_params(const char * user, const char * password, const char * host, const char * url_path){
+int initialize_connection_params(const char * user, const char * password, const char * hostname, const char * url_path){
 
-    if(host == NULL || url_path == NULL) return -1;
+    if(hostname == NULL || url_path == NULL) return -1;
 
     if((user == NULL && password != NULL) ||(user != NULL && password == NULL)) return -1;
 
@@ -74,14 +88,24 @@ int initialize_connection_params(const char * user, const char * password, const
         strcpy(params.password, password);
 
     } else {
-
-        params.user = NULL;
-        params.password = NULL;
+        
+        params.user = (char*) malloc(strlen("anonymous"));
+        params.user = "anonymous";
+        params.password = (char *) malloc(1);
+        params.password = "";
 
     }
 
-    params.host = (char*) malloc(strlen(host) * sizeof(char));
-    strcpy(params.host, host);
+    struct hostent *h = gethostbyname(hostname);
+    
+    if (h == NULL) {
+        return -1;
+    }
+
+    char* hostip = inet_ntoa(*((struct in_addr *) h->h_addr));
+
+    params.host = (char*) malloc(strlen(hostip) * sizeof(char));
+    strcpy(params.host, hostip);
     params.url_path = (char*) malloc(strlen(url_path) * sizeof(char));
     strcpy(params.url_path, url_path);
 
@@ -90,11 +114,145 @@ int initialize_connection_params(const char * user, const char * password, const
 
 void print_connection_params(){ 
     
-    if(params.user != NULL) 
+    if(strcmp(params.user, "anonymous") != 0)
         printf("FTP CONNECTION - user:%s; password:%s; host:%s; url_path:%s\n", params.user, params.password, params.host, params.url_path);
     else 
         printf("FTP CONNECTION - user:anonymous; host:%s; url_path:%s\n", params.host, params.url_path);
 
 }
 
+int open_connection(char* address, int port) {
+    int fd;
+    struct sockaddr_in server_addr;
 
+    /*server address handling*/
+    bzero((char *) &server_addr, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = inet_addr(address);    /*32 bit Internet address network byte ordered*/
+    server_addr.sin_port = htons(port);        /*server TCP port must be network byte ordered */
+
+    /*open a TCP socket*/
+    if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("socket()");
+        exit(-1);
+    }
+    /*connect to the server*/
+    if (connect(fd,
+                (struct sockaddr *) &server_addr,
+                sizeof(server_addr)) < 0) {
+        perror("connect()");
+        exit(-1);
+    }
+    return fd;
+}
+
+int get_answer_code(FILE* file) {
+    char *line = malloc(256);
+    int code = -1;
+    size_t n;
+    
+    while (getline(&line, &n, file)) {
+        printf("%s\n",line);
+        if (line[3] == ' ') {
+            code = atoi(line);
+            break;
+        }
+    }
+
+    free(line);
+
+    return code;
+}
+
+int login(int fd) {
+    FILE *file = fdopen(fd, "r");
+
+    char message[256];
+    int ans = 0;
+
+    while (ans != 1) {   
+        ans = get_answer_code(file);
+
+        switch (ans) {
+            case 220:
+                sprintf(message, "USER %s\n", params.user);
+                break;
+            case 331:
+                sprintf(message, "PASS %s\n", params.password);
+                break;
+            case 230:
+                sprintf(message, "PASV\n");
+                ans = 1;
+                break;
+            default:
+                return -1;
+        }
+
+        printf("%s\n", message);
+        write(fd, message, strlen(message));
+    }
+
+    return ans;
+}
+
+int download_file(int ctrl_fd) {
+
+    //open connection to download
+
+    FILE *ctrl = fdopen(ctrl_fd, "r");
+    char *line = malloc(256);
+    size_t n;
+
+    getline(&line, &n, ctrl);
+    printf("%s\n", line);
+    int code = atoi(line);
+    if (code != 227)
+        return -1;
+    
+    int address[4];
+    int port[2];
+    sscanf(line, "227 Entering Passive Mode (%d, %d, %d, %d, %d, %d).\n", &address[0], &address[1], &address[2], &address[3], &port[0], &port[1]);
+
+    char address_str[16];
+    sprintf(address_str, "%d.%d.%d.%d", address[0], address[1], address[2], address[3]);
+    int assembled_port = 256*port[0] + port[1];
+
+    int download_fd = open_connection(address_str, assembled_port);
+    FILE *data = fdopen(download_fd, "r");
+
+
+    //request download
+
+    size_t message_size = 6 + strlen(params.url_path);
+    char *message = malloc(message_size);
+    sprintf(message, "RETR %s\n", params.url_path);
+    write(ctrl_fd, message, message_size);
+    getline(&line, &n, ctrl);
+    printf("%s\n", line);
+
+
+    // receive file
+
+    getline(&line, &n, data);
+    printf("%s\n", line);
+
+    free(line);
+    return 0;
+}
+
+int my_func(){
+
+    int sockfd = open_connection(params.host, FTP_CTRL);
+
+    int result = login(sockfd);
+
+    if (result == 1)
+        download_file(sockfd);
+
+    if (close(sockfd)<0) {
+        perror("close()");
+        exit(-1);
+    }
+
+    return 0;
+}
