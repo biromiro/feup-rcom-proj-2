@@ -3,9 +3,14 @@
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
+#include <libgen.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #define FTP_CTRL 21
+#define MAX_LINE_SIZE 256
 
 connection_params params;
 
@@ -147,11 +152,11 @@ int open_connection(char* address, int port) {
 }
 
 int get_answer_code(FILE* file) {
-    char *line = malloc(256);
+    char *line = malloc(MAX_LINE_SIZE);
     int code = -1;
     size_t n;
     
-    while (getline(&line, &n, file)) {
+    while (getline(&line, &n, file) != -1) {
         printf("%s\n",line);
         if (line[3] == ' ') {
             code = atoi(line);
@@ -167,7 +172,7 @@ int get_answer_code(FILE* file) {
 int login(int fd) {
     FILE *file = fdopen(fd, "r");
 
-    char message[256];
+    char message[MAX_LINE_SIZE];
     int ans = 0;
 
     while (ans != 1) {   
@@ -200,7 +205,7 @@ int download_file(int ctrl_fd) {
     //open connection to download
 
     FILE *ctrl = fdopen(ctrl_fd, "r");
-    char *line = malloc(256);
+    char *line = malloc(MAX_LINE_SIZE);
     size_t n;
 
     getline(&line, &n, ctrl);
@@ -233,8 +238,14 @@ int download_file(int ctrl_fd) {
 
     // receive file
 
-    getline(&line, &n, data);
-    printf("%s\n", line);
+    char *filename = basename(params.url_path);
+
+    int file_fd = open(filename, O_WRONLY | O_CREAT, 0777);
+
+    while(getline(&line, &n, data) != -1) {
+        printf("%s\n", line);
+        write(file_fd, line, strlen(line));
+    }
 
     free(line);
     return 0;
