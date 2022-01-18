@@ -12,6 +12,13 @@
 #define FTP_CTRL 21
 #define MAX_LINE_SIZE 256
 
+#define OPEN_CONNECTION 150
+#define READY_USER 220
+#define FILE_ACTION_SUCCESS 226
+#define PASSIVE_MODE 227
+#define LOGGED_IN 230
+#define USER_OK_PASSWORD 331
+
 connection_params params;
 
 int check_and_initialize(char * url){
@@ -179,13 +186,13 @@ int login(int fd) {
         ans = get_answer_code(file);
 
         switch (ans) {
-            case 220:
+            case READY_USER:
                 sprintf(message, "USER %s\n", params.user);
                 break;
-            case 331:
+            case USER_OK_PASSWORD:
                 sprintf(message, "PASS %s\n", params.password);
                 break;
-            case 230:
+            case LOGGED_IN:
                 sprintf(message, "PASV\n");
                 ans = 1;
                 break;
@@ -211,9 +218,10 @@ int download_file(int ctrl_fd) {
     getline(&line, &n, ctrl);
     printf("%s\n", line);
     int code = atoi(line);
-    if (code != 227)
+    if (code != PASSIVE_MODE) {
+        free(line);
         return -1;
-    
+    }
     int address[4];
     int port[2];
     sscanf(line, "227 Entering Passive Mode (%d, %d, %d, %d, %d, %d).\n", &address[0], &address[1], &address[2], &address[3], &port[0], &port[1]);
@@ -223,7 +231,6 @@ int download_file(int ctrl_fd) {
     int assembled_port = 256*port[0] + port[1];
 
     int download_fd = open_connection(address_str, assembled_port);
-    FILE *data = fdopen(download_fd, "r");
 
 
     //request download
@@ -232,22 +239,25 @@ int download_file(int ctrl_fd) {
     char *message = malloc(message_size);
     sprintf(message, "RETR %s\n", params.url_path);
     write(ctrl_fd, message, message_size);
-    getline(&line, &n, ctrl);
-    printf("%s\n", line);
+    free(line);
+    if (get_answer_code(ctrl) != OPEN_CONNECTION)
+        return -1;
 
 
     // receive file
 
     char *filename = basename(params.url_path);
 
-    int file_fd = open(filename, O_WRONLY | O_CREAT, 0777);
+    int file_fd = open(filename, O_WRONLY | O_CREAT, 0666);
 
-    while(getline(&line, &n, data) != -1) {
-        printf("%s\n", line);
-        write(file_fd, line, strlen(line));
-    }
+    char download_byte[1];
 
-    free(line);
+    while(read(download_fd, download_byte, 1) != 0)
+        write(file_fd, download_byte, 1);
+
+    if(get_answer_code(ctrl) != FILE_ACTION_SUCCESS)
+        return -1;
+    
     return 0;
 }
 
